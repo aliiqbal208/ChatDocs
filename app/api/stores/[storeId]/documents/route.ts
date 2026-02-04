@@ -13,18 +13,43 @@ export async function GET(
 
     const response = await openai.vectorStores.files.list(storeId);
 
-    const documents: FileSearchDocument[] = response.data.map((file) => ({
-      name: `vectorStores/${storeId}/files/${file.id}`,
-      displayName: file.id,
-      createTime: new Date(file.created_at * 1000).toISOString(),
-      updateTime: new Date(file.created_at * 1000).toISOString(),
-      state: file.status === "completed" ? "STATE_ACTIVE" : 
-             file.status === "in_progress" ? "STATE_PENDING" :
-             file.status === "failed" ? "STATE_FAILED" : "STATE_UNSPECIFIED",
-      sizeBytes: "0", // OpenAI doesn't provide file size in vector store files
-      mimeType: undefined,
-      customMetadata: [],
-    }));
+    // Fetch file details for each file to get size and other metadata
+    const documents: FileSearchDocument[] = await Promise.all(
+      response.data.map(async (file) => {
+        try {
+          // Retrieve the actual file details from OpenAI Files API
+          const fileDetails = await openai.files.retrieve(file.id);
+          
+          return {
+            name: `vectorStores/${storeId}/files/${file.id}`,
+            displayName: fileDetails.filename || file.id,
+            createTime: new Date(file.created_at * 1000).toISOString(),
+            updateTime: new Date(file.created_at * 1000).toISOString(),
+            state: file.status === "completed" ? "STATE_ACTIVE" : 
+                   file.status === "in_progress" ? "STATE_PENDING" :
+                   file.status === "failed" ? "STATE_FAILED" : "STATE_UNSPECIFIED",
+            sizeBytes: fileDetails.bytes?.toString() || "0",
+            mimeType: undefined, // OpenAI doesn't provide mime type
+            customMetadata: [],
+          };
+        } catch (fileError) {
+          console.error(`Error fetching file details for ${file.id}:`, fileError);
+          // Fallback if file details fetch fails
+          return {
+            name: `vectorStores/${storeId}/files/${file.id}`,
+            displayName: file.id,
+            createTime: new Date(file.created_at * 1000).toISOString(),
+            updateTime: new Date(file.created_at * 1000).toISOString(),
+            state: file.status === "completed" ? "STATE_ACTIVE" : 
+                   file.status === "in_progress" ? "STATE_PENDING" :
+                   file.status === "failed" ? "STATE_FAILED" : "STATE_UNSPECIFIED",
+            sizeBytes: "0",
+            mimeType: undefined,
+            customMetadata: [],
+          };
+        }
+      })
+    );
 
     return NextResponse.json({ documents });
   } catch (error) {
